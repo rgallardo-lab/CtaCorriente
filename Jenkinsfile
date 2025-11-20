@@ -1,60 +1,79 @@
-// Jenkinsfile (Declarative Pipeline - Solución Corregida)
+// Jenkinsfile (Declarative Pipeline - Versión FINAL Definitiva)
 pipeline {
     agent any
     
-    // Variables de Entorno Globales
+    // Configuración de MAVEN_HOME
     environment {
-        // Asume que 'Maven_3.9' está en Global Tool Configuration
-        MAVEN_HOME = tool 'Maven_3.9' 
+        MAVEN_HOME = tool 'Maven_3.9'
         
-        // Configuración de Artifactory
-        ARTIFACTORY_SERVER_ID = 'BancoPlatinum_Artifactory_ID' 
-        ARTIFACTORY_REPO = 'maven-releases-platinum' 
-        BUILD_NAME = 'BancoPlatinum-Pipeline'
+        // Configuración de rutas y credenciales (para mayor seguridad y claridad)
+        ARTIFACT_NAME = "CtaCorriente-0.0.1-SNAPSHOT.war"
+        TARGET_FILE = "target/${ARTIFACT_NAME}"
+        
+        // URL de despliegue en Artifactory
+        ARTIFACTORY_URI = "http://localhost:8081/artifactory/maven-releases-platinum/com/platinum/CtaCorriente/0.0.1-SNAPSHOT/${ARTIFACT_NAME}"
+        
+        // Credenciales claras
+        ADMIN_USER = 'admin'
+        ADMIN_PASS = 'Artifactory' // Usar la clave de tu instancia
     }
     
     stages {
-        // Etapa 1: Source & Preparation
+        
         stage('Source & Preparation') {
             steps {
                 echo '=== 1. OBTENIENDO CÓDIGO DE GITHUB ==='
-                // Descarga el código
-                git url: 'https://github.com/rgallardo-lab/CtaCorriente.git', branch: 'master' 
             }
         }
         
-        // Etapa 2: Construcción, Pruebas (Unificada) y Despliegue con Plugin Artifactory
-        stage('Build, Test & Deploy') {
+        stage('Build Artifact (WAR)') {
             steps {
-                // Usamos el bloque 'script' para el despliegue avanzado
-                script {
-                    echo '=== 2. CONFIGURANDO LA INTEGRACIÓN CON ARTIFACTORY ==='
-                    
-                    // 1. Obtener la instancia de Artifactory (rtServer es un objeto Groovy)
-                    def server = Artifactory.server(ARTIFACTORY_SERVER_ID)
-                    
-                    // 2. Ejecutar Maven, correr las pruebas y automáticamente desplegar el artefacto.
-                    // Usamos el wrapper rtMaven para integrar Maven y Artifactory
-                    // Nota: Las pruebas de Surefire/Cucumber se ejecutarán aquí.
-                    def buildInfo = server.runMaven (
-                        pom: 'pom.xml',
-                        goals: 'clean install', // goals: 'clean install' corre todas las pruebas (JUnit/Cucumber)
-                        resolverId: ARTIFACTORY_SERVER_ID, // Uso para resolver dependencias
-                        deployerId: ARTIFACTORY_SERVER_ID, // Uso para el despliegue
-                        repo: ARTIFACTORY_REPO, // Repositorio de destino
-                        buildName: BUILD_NAME,
-                        buildNumber: env.BUILD_NUMBER
-                    )
-                    
-                    // 3. Publicar los resultados de las pruebas XML (Requisito 56)
-                    echo '=== 3. PUBLICANDO RESULTADOS DE PRUEBAS JUNIT/CUCUMBER ==='
-                    junit 'target/surefire-reports/*.xml'
-                    
-                    // 4. Publicar la información de la compilación para trazabilidad (Punto 57)
-                    echo '=== 4. PUBLICANDO BUILD INFO EN ARTIFACTORY ==='
-                    server.publishBuildInfo(buildInfo)
-                }
+                echo '=== 2. COMPILANDO ARTEFACTO WAR ==='
+                bat "${MAVEN_HOME}\\bin\\mvn clean package"
+            }
+        }
+        
+        stage('Test Execution & Reporting') {
+            steps {
+                echo '=== 3. EJECUTANDO PRUEBAS Y GENERANDO XML ==='
+                // Ejecuta las pruebas JUnit y Cucumber
+                bat "${MAVEN_HOME}\\bin\\mvn test"
+                
+                // Publicar resultados de pruebas (Requisito 56)
+                junit 'target/surefire-reports/*.xml' 
+            }
+        }
+
+stage('Deploy to Artifactory') {
+            steps {
+                echo "=== SUBIENDO ARTEFACTO A ARTIFACTORY ==="
+                
+                powershell """
+                \$Repo = 'platinum-deploy'
+                \$GroupPath = 'com/platinum/CtaCorriente/0.0.1-SNAPSHOT'
+                \$FileName = 'CtaCorriente-0.0.1-SNAPSHOT.war'
+
+                # Ruta del archivo generado por Maven
+                \$FilePath = "C:\\ProgramData\\Jenkins\\.jenkins\\workspace\\BancoPlatinum-Pipeline\\target\\\$FileName"
+
+                # URL destino en Artifactory
+                \$Url = "http://localhost:8081/artifactory/\$Repo/\$GroupPath/\$FileName"
+
+                # Credenciales en Base64 (admin:Artifactory)
+                \$Auth = "Basic YWRtaW46QXJ0aWZhY3Rvcnk="
+
+                Write-Host "Subiendo archivo a: \$Url"
+                Write-Host "Archivo local: \$FilePath"
+
+                Invoke-WebRequest -Method PUT -Uri \$Url -InFile \$FilePath `
+                    -Headers @{ Authorization = \$Auth } `
+                    -UseBasicParsing
+
+                Write-Host "=== DEPLOY COMPLETADO ==="
+                """
             }
         }
     }
 }
+
+// 31
